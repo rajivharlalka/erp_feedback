@@ -27,8 +27,8 @@ export function Legend() {
         ))}
       </ul>
       <p className="mt-3 hidden border-t border-white/10 pt-3 text-xs leading-relaxed text-slate-500 sm:block">
-        Stations and lines are lifted higher above the city the worse their current service is — a live 3D plot of
-        disruption across the network.
+        Stations and lines are lifted higher above the city the worse their current service is. The 3D carriages on the
+        lines are live trains, polled every 500ms from TfL Trackernet.
       </p>
     </div>
   );

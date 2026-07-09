@@ -6,6 +6,8 @@ interface HeaderProps {
   onRefresh: () => void;
   onOpenSidebar?: () => void;
   showMenuButton?: boolean;
+  trainCount?: number;
+  trainsLive?: boolean;
 }
 
 function formatUpdatedAt(iso: string | null): string {
@@ -14,10 +16,18 @@ function formatUpdatedAt(iso: string | null): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export function Header({ updatedAt, isFetching, onRefresh, onOpenSidebar, showMenuButton }: HeaderProps) {
+export function Header({
+  updatedAt,
+  isFetching,
+  onRefresh,
+  onOpenSidebar,
+  showMenuButton,
+  trainCount = 0,
+  trainsLive = false,
+}: HeaderProps) {
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3 sm:flex sm:justify-center sm:p-4">
-      <div className="pointer-events-auto flex w-full max-w-xl items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 px-3 py-2.5 shadow-2xl backdrop-blur-md sm:w-auto sm:gap-4 sm:px-5 sm:py-3">
+      <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 px-3 py-2.5 shadow-2xl backdrop-blur-md sm:w-auto sm:gap-4 sm:px-5 sm:py-3">
         {showMenuButton && (
           <button
             type="button"
@@ -46,6 +56,14 @@ export function Header({ updatedAt, isFetching, onRefresh, onOpenSidebar, showMe
             <p className="hidden text-xs text-slate-400 sm:block">Unofficial visualization of live TfL line status</p>
             <p className="truncate text-[11px] text-slate-400 sm:hidden">Updated {formatUpdatedAt(updatedAt)}</p>
           </div>
+        </div>
+
+        <div
+          className="hidden items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 sm:flex"
+          title="Live train positions polled every 500ms"
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${trainsLive ? 'animate-pulse bg-emerald-400' : 'bg-slate-500'}`} />
+          {trainsLive ? `${trainCount} trains live` : 'Trains…'}
         </div>
 
         <div className="hidden h-8 w-px bg-white/10 md:block" />

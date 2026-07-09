@@ -69,3 +69,20 @@ export const DEFAULT_LINE_COLOR = '#6B7280';
 
 export const CACHE_TTL_STATUS_MS = 45_000;
 export const CACHE_TTL_ROUTE_MS = 12 * 60 * 60 * 1000;
+/** Arrivals change often; keep short so 500ms client polls feel live without hammering TfL. */
+export const CACHE_TTL_ARRIVALS_MS = 1_000;
+
+/** Tube line ids used when batching /Line/{ids}/Arrivals. */
+export const TUBE_LINE_IDS = [
+  'bakerloo',
+  'central',
+  'circle',
+  'district',
+  'hammersmith-city',
+  'jubilee',
+  'metropolitan',
+  'northern',
+  'piccadilly',
+  'victoria',
+  'waterloo-city',
+] as const;

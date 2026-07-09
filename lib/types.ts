@@ -72,3 +72,55 @@ export interface NetworkResponse {
   stations: StationFeature[];
   updatedAt: string;
 }
+
+/** Live train prediction as returned by TfL /Line/{ids}/Arrivals (trimmed). */
+export interface TflPredictionRaw {
+  id: string;
+  vehicleId?: string;
+  naptanId: string;
+  stationName: string;
+  lineId: string;
+  lineName: string;
+  platformName?: string;
+  direction?: string;
+  destinationNaptanId?: string;
+  destinationName?: string;
+  timeToStation: number;
+  currentLocation?: string;
+  towards?: string;
+  expectedArrival?: string;
+  modeName?: string;
+}
+
+export interface TrainFeature {
+  id: string;
+  vehicleId: string;
+  lineId: string;
+  lineName: string;
+  color: string;
+  mode: string;
+  lat: number;
+  lon: number;
+  /** Meters above the basemap — sits just above the elevated route. */
+  elevation: number;
+  currentLocation: string;
+  towards?: string;
+  direction?: string;
+  destinationName?: string;
+  nextStationName?: string;
+  timeToNextStation?: number;
+  /** When known, the segment the train is travelling along (for live glide). */
+  segmentFromLat?: number;
+  segmentFromLon?: number;
+  segmentToLat?: number;
+  segmentToLon?: number;
+  /** 0 = at from-station, 1 = at to-station. */
+  segmentProgress?: number;
+  /** Degrees clockwise from north. */
+  heading?: number;
+}
+
+export interface TrainsResponse {
+  trains: TrainFeature[];
+  updatedAt: string;
+}
