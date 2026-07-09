@@ -109,6 +109,15 @@ export interface TrainFeature {
   destinationName?: string;
   nextStationName?: string;
   timeToNextStation?: number;
+  /** When known, the segment the train is travelling along (for live glide). */
+  segmentFromLat?: number;
+  segmentFromLon?: number;
+  segmentToLat?: number;
+  segmentToLon?: number;
+  /** 0 = at from-station, 1 = at to-station. */
+  segmentProgress?: number;
+  /** Degrees clockwise from north. */
+  heading?: number;
 }
 
 export interface TrainsResponse {

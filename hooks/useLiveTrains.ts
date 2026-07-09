@@ -14,9 +14,14 @@ export interface AnimatedTrain extends TrainFeature {
   fromLat: number;
   fromLon: number;
   movedAt: number;
+  /** Degrees clockwise from north — drives 3D mesh orientation. */
+  heading: number;
 }
 
 const LERP_MS = 1000;
+
+/** Soft glide along a known segment so trains keep moving between polls. */
+const SEGMENT_GLIDE_MS = 45_000;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * Math.min(1, Math.max(0, t));
@@ -26,8 +31,61 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+function headingBetween(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  const dLat = toLat - fromLat;
+  const dLon = toLon - fromLon;
+  if (Math.abs(dLat) < 1e-10 && Math.abs(dLon) < 1e-10) return 0;
+  return ((Math.atan2(dLon, dLat) * 180) / Math.PI + 360) % 360;
+}
+
+function resolveHeading(train: TrainFeature, fromLat: number, fromLon: number, toLat: number, toLon: number): number {
+  if (typeof train.heading === 'number' && Number.isFinite(train.heading)) return train.heading;
+  return headingBetween(fromLat, fromLon, toLat, toLon);
+}
+
+function segmentTargets(train: TrainFeature): {
+  lat: number;
+  lon: number;
+  fromLat: number;
+  fromLon: number;
+  toLat: number;
+  toLon: number;
+  heading: number;
+} | null {
+  const { segmentFromLat, segmentFromLon, segmentToLat, segmentToLon, segmentProgress, timeToNextStation } = train;
+  if (
+    segmentFromLat == null ||
+    segmentFromLon == null ||
+    segmentToLat == null ||
+    segmentToLon == null
+  ) {
+    return null;
+  }
+
+  // Estimate progress from ETA when available so mid-route trains keep gliding.
+  let progress = typeof segmentProgress === 'number' ? segmentProgress : 0.5;
+  if (typeof timeToNextStation === 'number' && timeToNextStation > 0) {
+    const etaProgress = 1 - Math.min(1, Math.max(0, timeToNextStation / (SEGMENT_GLIDE_MS / 1000)));
+    // Prefer ETA when we only have a coarse midpoint (0.5).
+    if (Math.abs(progress - 0.5) < 0.05) progress = etaProgress;
+  }
+
+  const lat = lerp(segmentFromLat, segmentToLat, progress);
+  const lon = lerp(segmentFromLon, segmentToLon, progress);
+  return {
+    lat,
+    lon,
+    fromLat: segmentFromLat,
+    fromLon: segmentFromLon,
+    toLat: segmentToLat,
+    toLon: segmentToLon,
+    heading: resolveHeading(train, segmentFromLat, segmentFromLon, segmentToLat, segmentToLon),
+  };
+}
+
 /**
  * Poll `/api/trains` every 500ms and expose smoothly interpolated positions.
+ * Trains with a known station segment also glide forward between polls.
  */
 export function useLiveTrains(modes: string[], enabled = true) {
   const [trains, setTrains] = useState<AnimatedTrain[]>([]);
@@ -48,17 +106,33 @@ export function useLiveTrains(modes: string[], enabled = true) {
     const paint = () => {
       const now = performance.now();
       rafRef.current = requestAnimationFrame(paint);
-      // ~12 fps is enough for smooth glides without thrashing React/deck.gl.
-      if (now - lastPaint < 80) return;
+      // ~20 fps keeps 3D meshes smooth without thrashing React/deck.gl.
+      if (now - lastPaint < 50) return;
       lastPaint = now;
 
       const next: AnimatedTrain[] = [];
       for (const train of mapRef.current.values()) {
         const t = easeInOut((now - train.movedAt) / LERP_MS);
+        let displayLat = lerp(train.fromLat, train.targetLat, t);
+        let displayLon = lerp(train.fromLon, train.targetLon, t);
+
+        // Keep mid-route trains drifting toward the next station between polls.
+        const seg = segmentTargets(train);
+        if (seg && typeof train.timeToNextStation === 'number' && train.timeToNextStation > 8) {
+          const glide = Math.min(1, (now - train.movedAt) / SEGMENT_GLIDE_MS);
+          const ahead = Math.min(1, (train.segmentProgress ?? 0.5) + glide * 0.15);
+          const glideLat = lerp(seg.fromLat, seg.toLat, ahead);
+          const glideLon = lerp(seg.fromLon, seg.toLon, ahead);
+          // Blend poll-lerp with soft segment glide so motion never freezes.
+          displayLat = lerp(displayLat, glideLat, 0.35);
+          displayLon = lerp(displayLon, glideLon, 0.35);
+        }
+
         next.push({
           ...train,
-          displayLat: lerp(train.fromLat, train.targetLat, t),
-          displayLon: lerp(train.fromLon, train.targetLon, t),
+          displayLat,
+          displayLon,
+          heading: train.heading,
         });
       }
       setTrains(next);
@@ -75,30 +149,45 @@ export function useLiveTrains(modes: string[], enabled = true) {
 
         for (const train of payload.trains) {
           const existing = prev.get(train.id);
+          const seg = segmentTargets(train);
+          const targetLat = seg?.lat ?? train.lat;
+          const targetLon = seg?.lon ?? train.lon;
+          const heading =
+            seg?.heading ??
+            resolveHeading(
+              train,
+              existing?.displayLat ?? train.lat,
+              existing?.displayLon ?? train.lon,
+              targetLat,
+              targetLon,
+            );
+
           if (existing) {
             const moved =
-              Math.abs(existing.targetLat - train.lat) > 1e-6 ||
-              Math.abs(existing.targetLon - train.lon) > 1e-6;
+              Math.abs(existing.targetLat - targetLat) > 1e-6 ||
+              Math.abs(existing.targetLon - targetLon) > 1e-6;
             next.set(train.id, {
               ...train,
               fromLat: moved ? existing.displayLat : existing.fromLat,
               fromLon: moved ? existing.displayLon : existing.fromLon,
-              targetLat: train.lat,
-              targetLon: train.lon,
+              targetLat,
+              targetLon,
               displayLat: existing.displayLat,
               displayLon: existing.displayLon,
               movedAt: moved ? now : existing.movedAt,
+              heading: moved ? heading : existing.heading || heading,
             });
           } else {
             next.set(train.id, {
               ...train,
-              fromLat: train.lat,
-              fromLon: train.lon,
-              targetLat: train.lat,
-              targetLon: train.lon,
-              displayLat: train.lat,
-              displayLon: train.lon,
+              fromLat: targetLat,
+              fromLon: targetLon,
+              targetLat,
+              targetLon,
+              displayLat: targetLat,
+              displayLon: targetLon,
               movedAt: now,
+              heading,
             });
           }
         }

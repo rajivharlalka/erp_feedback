@@ -1,5 +1,6 @@
 'use client';
 
+import { AmbientLight, DirectionalLight, LightingEffect } from '@deck.gl/core';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useRef, useState } from 'react';
@@ -13,6 +14,12 @@ import { TrainTooltip } from './TrainTooltip';
 
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 const LONDON_CENTER: [number, number] = [-0.1276, 51.5072];
+
+const lightingEffect = new LightingEffect({
+  ambient: new AmbientLight({ color: [255, 255, 255], intensity: 0.85 }),
+  sun: new DirectionalLight({ color: [255, 248, 235], intensity: 1.1, direction: [-1, -2, -1.5] }),
+  fill: new DirectionalLight({ color: [180, 200, 255], intensity: 0.35, direction: [1, 0.5, -0.5] }),
+});
 
 interface HoveredStation {
   station: StationFeature;
@@ -82,7 +89,11 @@ export function MapView({
 
     mapRef.current = map;
 
-    const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
+    const overlay = new MapboxOverlay({
+      interleaved: false,
+      layers: [],
+      effects: [lightingEffect],
+    });
     overlayRef.current = overlay;
     map.addControl(overlay as unknown as maplibregl.IControl);
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
