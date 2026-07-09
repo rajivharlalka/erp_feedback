@@ -3,18 +3,30 @@
   "private": true,
   "version": "0.1.0",
   "description": "A 3D live map of London Underground line status, built on TfL open data.",
-  "workspaces": [
-    "server",
-    "web"
-  ],
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
-    "build": "npm run build -w server && npm run build -w web",
-    "start": "npm run start -w server",
-    "lint": "npm run lint -w server && npm run lint -w web"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.3.6",
+    "@deck.gl/layers": "^9.3.6",
+    "@deck.gl/mapbox": "^9.3.6",
+    "@tanstack/react-query": "^5.101.2",
+    "clsx": "^2.1.1",
+    "maplibre-gl": "^5.24.0",
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^5.7.2"
   },
   "engines": {
     "node": ">=18"

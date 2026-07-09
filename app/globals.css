@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  background-color: #020617;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.maplibregl-map,
+.maplibregl-canvas-container,
+.maplibregl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+}
