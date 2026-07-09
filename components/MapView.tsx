@@ -3,7 +3,7 @@
 import { AmbientLight, DirectionalLight, LightingEffect } from '@deck.gl/core';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import maplibregl from 'maplibre-gl';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { boundsOfLine } from '@/map/geo';
 import { buildLayers } from '@/map/buildLayers';
 import { buildTrainLayers } from '@/map/buildTrainLayer';
@@ -57,10 +57,38 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
+  const baseLayersRef = useRef<ReturnType<typeof buildLayers>>([]);
+  const trainLayersRef = useRef<ReturnType<typeof buildTrainLayers>>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [hoveredStation, setHoveredStation] = useState<HoveredStation | null>(null);
   const [hoveredTrain, setHoveredTrain] = useState<HoveredTrain | null>(null);
+
+  // Static map layers and animated train layers update independently. Reusing
+  // the static layer instances prevents route/station flashes on every frame.
+  const syncLayers = useCallback(() => {
+    overlayRef.current?.setProps({
+      layers: [...baseLayersRef.current, ...trainLayersRef.current],
+    });
+  }, []);
+
+  const onHoverStation = useCallback((station: StationFeature | null, x: number, y: number) => {
+    setHoveredStation((current) => {
+      if (!station) return null;
+      if (current?.station.id === station.id && current.x === x && current.y === y) return current;
+      return { station, x, y };
+    });
+    if (station) setHoveredTrain(null);
+  }, []);
+
+  const onHoverTrain = useCallback((train: AnimatedTrain | null, x: number, y: number) => {
+    setHoveredTrain((current) => {
+      if (!train) return null;
+      if (current?.train.id === train.id && current.x === x && current.y === y) return current;
+      return { train, x, y };
+    });
+    if (train) setHoveredStation(null);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -137,31 +165,39 @@ export function MapView({
   useEffect(() => {
     if (!overlayRef.current || !mapReady) return;
 
-    const baseLayers = buildLayers({
+    baseLayersRef.current = buildLayers({
       lines,
       stations,
       modeMeta,
       visibleModes,
       hoveredStationId: hoveredStation?.station.id ?? null,
-      onHoverStation: (station, x, y) => {
-        setHoveredStation(station ? { station, x, y } : null);
-        if (station) setHoveredTrain(null);
-      },
+      onHoverStation,
       onClickLine: onSelectLine,
     });
+    syncLayers();
+  }, [
+    lines,
+    stations,
+    modeMeta,
+    visibleModes,
+    hoveredStation?.station.id,
+    onHoverStation,
+    onSelectLine,
+    mapReady,
+    syncLayers,
+  ]);
 
-    const trainLayers = buildTrainLayers({
+  useEffect(() => {
+    if (!overlayRef.current || !mapReady) return;
+
+    trainLayersRef.current = buildTrainLayers({
       trains,
       visibleModes,
       hoveredTrainId: hoveredTrain?.train.id ?? null,
-      onHoverTrain: (train, x, y) => {
-        setHoveredTrain(train ? { train, x, y } : null);
-        if (train) setHoveredStation(null);
-      },
+      onHoverTrain,
     });
-
-    overlayRef.current.setProps({ layers: [...baseLayers, ...trainLayers] });
-  }, [lines, stations, trains, modeMeta, visibleModes, hoveredStation, hoveredTrain, onSelectLine, mapReady]);
+    syncLayers();
+  }, [trains, visibleModes, hoveredTrain?.train.id, onHoverTrain, mapReady, syncLayers]);
 
   useEffect(() => {
     if (!focusLine || !mapRef.current || !mapReady) return;

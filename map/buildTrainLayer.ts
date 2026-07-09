@@ -23,7 +23,7 @@ function visibleTrainColor(hex: string): [number, number, number] {
 
 /**
  * Live tube trains as elevated 3D carriage meshes.
- * Positions are polled every 500ms and lerped on the client.
+ * Positions are polled every two seconds and lerped on the client.
  */
 export function buildTrainLayers({ trains, visibleModes, hoveredTrainId, onHoverTrain }: TrainLayerOptions) {
   const visible =
