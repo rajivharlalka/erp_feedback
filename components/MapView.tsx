@@ -24,9 +24,18 @@ interface MapViewProps {
   visibleModes: Set<string>;
   focusLine: LineFeature | null;
   onSelectLine: (line: LineFeature) => void;
+  isDesktop?: boolean;
 }
 
-export function MapView({ lines, stations, modeMeta, visibleModes, focusLine, onSelectLine }: MapViewProps) {
+export function MapView({
+  lines,
+  stations,
+  modeMeta,
+  visibleModes,
+  focusLine,
+  onSelectLine,
+  isDesktop = true,
+}: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -125,13 +134,15 @@ export function MapView({ lines, stations, modeMeta, visibleModes, focusLine, on
     const bounds = boundsOfLine(focusLine);
     if (!bounds) return;
     mapRef.current.fitBounds(bounds, {
-      padding: { top: 96, bottom: 96, left: 420, right: 96 },
+      padding: isDesktop
+        ? { top: 96, bottom: 96, left: 420, right: 96 }
+        : { top: 88, bottom: 120, left: 32, right: 32 },
       duration: 1400,
-      pitch: 55,
+      pitch: isDesktop ? 55 : 45,
       bearing: -17,
       maxZoom: 14,
     });
-  }, [focusLine, mapReady]);
+  }, [focusLine, mapReady, isDesktop]);
 
   return (
     <div className="absolute inset-0">

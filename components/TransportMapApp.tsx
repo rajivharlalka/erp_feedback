@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Header } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
 import { Legend } from '@/components/Legend';
@@ -21,11 +21,33 @@ const MapView = dynamic(() => import('@/components/MapView').then((m) => m.MapVi
   ),
 });
 
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  return isDesktop;
+}
+
 export function TransportMapApp() {
   const modes = useMemo<string[]>(() => [...AVAILABLE_MODES], []);
   const { data, isLoading, isFetching, isError, error, refetch } = useNetworkData(modes);
   const [visibleModes, setVisibleModes] = useState<Set<string>>(new Set(modes));
   const [selectedLine, setSelectedLine] = useState<LineFeature | null>(null);
+  const isDesktop = useIsDesktop();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Keep the desktop sidebar "open" for accessibility / aria; mobile starts closed.
+  useEffect(() => {
+    if (isDesktop) setSidebarOpen(true);
+    else setSidebarOpen(false);
+  }, [isDesktop]);
 
   function toggleMode(mode: string) {
     setVisibleModes((prev) => {
@@ -41,7 +63,7 @@ export function TransportMapApp() {
   const modeMeta = data?.modeMeta ?? {};
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+    <div className="relative h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100">
       <MapView
         lines={lines}
         stations={stations}
@@ -49,9 +71,16 @@ export function TransportMapApp() {
         visibleModes={visibleModes}
         focusLine={selectedLine}
         onSelectLine={setSelectedLine}
+        isDesktop={isDesktop}
       />
 
-      <Header updatedAt={data?.updatedAt ?? null} isFetching={isFetching} onRefresh={() => refetch()} />
+      <Header
+        updatedAt={data?.updatedAt ?? null}
+        isFetching={isFetching}
+        onRefresh={() => refetch()}
+        showMenuButton={!isLoading && !!data}
+        onOpenSidebar={() => setSidebarOpen(true)}
+      />
 
       {!isLoading && data && (
         <Sidebar
@@ -61,10 +90,15 @@ export function TransportMapApp() {
           lines={lines}
           selectedLineId={selectedLine?.id ?? null}
           onSelectLine={setSelectedLine}
+          open={sidebarOpen}
+          onClose={() => {
+            if (!isDesktop) setSidebarOpen(false);
+          }}
         />
       )}
 
-      {!isLoading && data && <Legend />}
+      {/* Hide legend while the mobile sheet is open so panels don't stack. */}
+      {!isLoading && data && (isDesktop || !sidebarOpen) && <Legend />}
 
       {isLoading && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70">
@@ -76,7 +110,7 @@ export function TransportMapApp() {
       )}
 
       {isError && (
-        <div className="pointer-events-auto absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-xl border border-red-400/30 bg-red-950/90 px-4 py-3 text-sm text-red-200 shadow-2xl">
+        <div className="pointer-events-auto absolute bottom-24 left-3 right-3 z-30 rounded-xl border border-red-400/30 bg-red-950/90 px-4 py-3 text-sm text-red-200 shadow-2xl sm:bottom-4 sm:left-1/2 sm:right-auto sm:max-w-md sm:-translate-x-1/2">
           {error instanceof Error ? error.message : 'Failed to load live TfL data.'}{' '}
           <button type="button" onClick={() => refetch()} className="ml-2 underline underline-offset-2">
             Retry
