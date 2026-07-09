@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const payload = await fetchTrains(effectiveModes);
     return NextResponse.json(payload, {
       headers: {
-        // Client polls every 500ms; keep CDN/browser cache very short.
+        // Client polls every two seconds; keep CDN/browser cache very short.
         'Cache-Control': 'public, s-maxage=1, stale-while-revalidate=1',
       },
     });

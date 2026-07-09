@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchTrains } from '@/lib/api';
 import type { TrainFeature } from '@/lib/types';
 
-export const TRAIN_POLL_MS = 500;
+/** Fetch live positions every two seconds; animation fills the interval. */
+export const TRAIN_POLL_MS = 2_000;
 
 export interface AnimatedTrain extends TrainFeature {
   displayLat: number;
@@ -18,7 +19,9 @@ export interface AnimatedTrain extends TrainFeature {
   heading: number;
 }
 
-const LERP_MS = 1000;
+// Run very slightly longer than the poll cadence. This avoids a visible pause
+// when a response takes a little longer than expected.
+const LERP_MS = 2_200;
 
 /** Soft glide along a known segment so trains keep moving between polls. */
 const SEGMENT_GLIDE_MS = 45_000;
@@ -84,7 +87,7 @@ function segmentTargets(train: TrainFeature): {
 }
 
 /**
- * Poll `/api/trains` every 500ms and expose smoothly interpolated positions.
+ * Poll `/api/trains` every two seconds and expose smoothly interpolated positions.
  * Trains with a known station segment also glide forward between polls.
  */
 export function useLiveTrains(modes: string[], enabled = true) {
@@ -96,6 +99,7 @@ export function useLiveTrains(modes: string[], enabled = true) {
   const mapRef = useRef<Map<string, AnimatedTrain>>(new Map());
   const rafRef = useRef(0);
   const pollRef = useRef(0);
+  const requestInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -106,8 +110,8 @@ export function useLiveTrains(modes: string[], enabled = true) {
     const paint = () => {
       const now = performance.now();
       rafRef.current = requestAnimationFrame(paint);
-      // ~20 fps keeps 3D meshes smooth without thrashing React/deck.gl.
-      if (now - lastPaint < 50) return;
+      // 15 fps is smooth at map scale while avoiding needless WebGL churn.
+      if (now - lastPaint < 66) return;
       lastPaint = now;
 
       const next: AnimatedTrain[] = [];
@@ -139,6 +143,9 @@ export function useLiveTrains(modes: string[], enabled = true) {
     };
 
     async function poll() {
+      // Avoid out-of-order responses replacing newer positions.
+      if (requestInFlightRef.current) return;
+      requestInFlightRef.current = true;
       try {
         const payload = await fetchTrains(modes);
         if (cancelled) return;
@@ -208,6 +215,8 @@ export function useLiveTrains(modes: string[], enabled = true) {
           setError(err instanceof Error ? err.message : 'Failed to fetch live trains');
           setIsLive(false);
         }
+      } finally {
+        requestInFlightRef.current = false;
       }
     }
 
