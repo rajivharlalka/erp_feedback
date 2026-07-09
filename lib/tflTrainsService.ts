@@ -9,7 +9,7 @@ import {
 import { TtlCache } from './cache';
 import { tflGet } from './tflClient';
 import { buildStationIndex, parseCurrentLocation } from './trainLocation';
-import type { StationFeature, TflPredictionRaw, TrainFeature, TrainsResponse } from './types';
+import type { TflPredictionRaw, TrainFeature, TrainsResponse } from './types';
 import { fetchNetwork } from './tflNetworkService';
 
 const arrivalsCache = new TtlCache<TflPredictionRaw[]>(CACHE_TTL_ARRIVALS_MS);
@@ -42,38 +42,11 @@ function pickBestPredictionPerVehicle(predictions: TflPredictionRaw[]): TflPredi
   return [...best.values()];
 }
 
-function findStationByIdOrName(
-  stations: StationFeature[],
-  index: Map<string, { id: string; name: string; lat: number; lon: number }>,
-  naptanId?: string,
-  name?: string,
-): StationFeature | null {
-  if (naptanId) {
-    const byId = stations.find((s) => s.id === naptanId);
-    if (byId) return byId;
-  }
-  if (name) {
-    const needle = name
-      .toLowerCase()
-      .replace(/\bunderground station\b/g, '')
-      .replace(/\bstation\b/g, '')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim();
-    const hit = index.get(needle);
-    if (hit) return stations.find((s) => s.id === hit.id) ?? null;
-  }
-  return null;
-}
-
 function headingBetween(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
   const dLat = toLat - fromLat;
   const dLon = toLon - fromLon;
   if (Math.abs(dLat) < 1e-10 && Math.abs(dLon) < 1e-10) return 0;
   return ((Math.atan2(dLon, dLat) * 180) / Math.PI + 360) % 360;
-}
-
-function almostSame(aLat: number, aLon: number, bLat: number, bLon: number): boolean {
-  return Math.abs(aLat - bLat) < 1e-5 && Math.abs(aLon - bLon) < 1e-5;
 }
 
 export async function fetchTrains(modes: string[] = [...MODES]): Promise<TrainsResponse> {
@@ -91,16 +64,7 @@ export async function fetchTrains(modes: string[] = [...MODES]): Promise<TrainsR
   const trains: TrainFeature[] = [];
 
   for (const prediction of perVehicle) {
-    const nextStation =
-      network.stations.find((s) => s.id === prediction.naptanId) ??
-      findStationByIdOrName(network.stations, stationIndex, prediction.naptanId, prediction.stationName);
-
-    const destination = findStationByIdOrName(
-      network.stations,
-      stationIndex,
-      prediction.destinationNaptanId,
-      prediction.destinationName,
-    );
+    const nextStation = network.stations.find((s) => s.id === prediction.naptanId);
 
     const parsed = parseCurrentLocation(
       prediction.currentLocation,
@@ -114,81 +78,28 @@ export async function fetchTrains(modes: string[] = [...MODES]): Promise<TrainsR
 
     const color = LINE_COLORS[prediction.lineId] ?? DEFAULT_LINE_COLOR;
 
-    let segmentFromLat = parsed.fromLat;
-    let segmentFromLon = parsed.fromLon;
-    let segmentToLat = parsed.toLat;
-    let segmentToLon = parsed.toLon;
-    let segmentProgress = parsed.progress ?? 0;
-    let heading = parsed.heading;
-
-    // Complete a one-sided segment using next/destination stations.
-    if (segmentFromLat != null && segmentFromLon != null && segmentToLat == null) {
-      const target =
-        nextStation && !almostSame(segmentFromLat, segmentFromLon, nextStation.lat, nextStation.lon)
-          ? nextStation
-          : destination && !almostSame(segmentFromLat, segmentFromLon, destination.lat, destination.lon)
-            ? destination
-            : null;
-      if (target) {
-        segmentToLat = target.lat;
-        segmentToLon = target.lon;
-      }
-    }
-
-    if (segmentToLat != null && segmentToLon != null && segmentFromLat == null) {
-      const origin =
-        destination && !almostSame(segmentToLat, segmentToLon, destination.lat, destination.lon)
-          ? destination
-          : null;
-      if (origin) {
-        segmentFromLat = origin.lat;
-        segmentFromLon = origin.lon;
-      } else {
-        // Synthetic inbound so the mesh still has a non-zero heading.
-        segmentFromLat = segmentToLat - 0.0005;
-        segmentFromLon = segmentToLon;
-      }
-    }
-
-    // Platform trains with no segment yet: face toward destination from the platform.
-    if (
-      segmentFromLat == null &&
-      segmentToLat == null &&
-      nextStation &&
-      destination &&
-      !almostSame(nextStation.lat, nextStation.lon, destination.lat, destination.lon)
-    ) {
-      segmentFromLat = nextStation.lat;
-      segmentFromLon = nextStation.lon;
-      segmentToLat = destination.lat;
-      segmentToLon = destination.lon;
-      segmentProgress = 0;
-    }
-
-    if (
-      segmentFromLat != null &&
-      segmentFromLon != null &&
-      segmentToLat != null &&
-      segmentToLon != null
-    ) {
-      heading = heading ?? headingBetween(segmentFromLat, segmentFromLon, segmentToLat, segmentToLon);
-    } else {
-      heading = heading ?? 0;
-    }
-
-    let lat = parsed.lat;
-    let lon = parsed.lon;
-    if (
-      segmentFromLat != null &&
-      segmentFromLon != null &&
-      segmentToLat != null &&
-      segmentToLon != null &&
-      segmentProgress > 0 &&
-      segmentProgress < 1
-    ) {
-      lat = segmentFromLat + (segmentToLat - segmentFromLat) * segmentProgress;
-      lon = segmentFromLon + (segmentToLon - segmentFromLon) * segmentProgress;
-    }
+    // TfL only reports a coarse text location, not GPS.  Do not invent a
+    // straight-line path to a destination or use ETA as a position estimate:
+    // either can put a carriage across London from its actual route.
+    //
+    // A segment is retained only when Trackernet explicitly says "Between A
+    // and B"; it provides a trustworthy orientation for the carriage, while
+    // its reported midpoint remains the display position.
+    const hasConfirmedSegment =
+      parsed.fromLat != null &&
+      parsed.fromLon != null &&
+      parsed.toLat != null &&
+      parsed.toLon != null;
+    const segmentFromLat = hasConfirmedSegment ? parsed.fromLat : undefined;
+    const segmentFromLon = hasConfirmedSegment ? parsed.fromLon : undefined;
+    const segmentToLat = hasConfirmedSegment ? parsed.toLat : undefined;
+    const segmentToLon = hasConfirmedSegment ? parsed.toLon : undefined;
+    const segmentProgress = hasConfirmedSegment ? parsed.progress : undefined;
+    const heading =
+      parsed.heading ??
+      (hasConfirmedSegment
+        ? headingBetween(segmentFromLat!, segmentFromLon!, segmentToLat!, segmentToLon!)
+        : undefined);
 
     trains.push({
       id: `${prediction.lineId}:${prediction.vehicleId || prediction.id}`,
@@ -197,8 +108,8 @@ export async function fetchTrains(modes: string[] = [...MODES]): Promise<TrainsR
       lineName: prediction.lineName,
       color,
       mode: prediction.modeName || 'tube',
-      lat,
-      lon,
+      lat: parsed.lat,
+      lon: parsed.lon,
       elevation: modeElevation + 18,
       currentLocation: prediction.currentLocation || 'Unknown location',
       towards: prediction.towards,

@@ -26,14 +26,7 @@ function visibleTrainColor(hex: string): [number, number, number] {
  * Positions are polled every two seconds and lerped on the client.
  */
 export function buildTrainLayers({ trains, visibleModes, hoveredTrainId, onHoverTrain }: TrainLayerOptions) {
-  const visible =
-    visibleModes.size === 0
-      ? trains
-      : trains.filter((t) => visibleModes.has(t.mode) || visibleModes.has('tube') || t.mode === 'tube');
-
-  const positionKey = visible
-    .map((t) => `${t.id}:${t.displayLat.toFixed(5)}:${t.displayLon.toFixed(5)}:${t.heading.toFixed(0)}`)
-    .join('|');
+  const visible = trains.filter((t) => visibleModes.has(t.mode));
 
   return [
     // Soft ground glow so trains stay findable at city zoom
@@ -50,7 +43,6 @@ export function buildTrainLayers({ trains, visibleModes, hoveredTrainId, onHover
       filled: true,
       pickable: false,
       positionFormat: 'XYZ',
-      updateTriggers: { getPosition: [positionKey] },
     }),
     // True 3D tube carriage — elongated cube oriented along travel heading
     new SimpleMeshLayer<AnimatedTrain>({
@@ -77,8 +69,6 @@ export function buildTrainLayers({ trains, visibleModes, hoveredTrainId, onHover
       },
       onHover: (info) => onHoverTrain((info.object as AnimatedTrain | undefined) ?? null, info.x, info.y),
       updateTriggers: {
-        getPosition: [positionKey],
-        getOrientation: [positionKey],
         getScale: [hoveredTrainId],
         getColor: [hoveredTrainId],
       },
@@ -103,7 +93,6 @@ export function buildTrainLayers({ trains, visibleModes, hoveredTrainId, onHover
       filled: true,
       pickable: false,
       positionFormat: 'XYZ',
-      updateTriggers: { getPosition: [positionKey] },
     }),
   ];
 }

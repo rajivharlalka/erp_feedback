@@ -15,6 +15,7 @@ export interface AnimatedTrain extends TrainFeature {
   fromLat: number;
   fromLon: number;
   movedAt: number;
+  lastSeenAt: number;
   /** Degrees clockwise from north — drives 3D mesh orientation. */
   heading: number;
 }
@@ -23,15 +24,11 @@ export interface AnimatedTrain extends TrainFeature {
 // when a response takes a little longer than expected.
 const LERP_MS = 2_200;
 
-/** Soft glide along a known segment so trains keep moving between polls. */
-const SEGMENT_GLIDE_MS = 45_000;
+/** Retain a transiently missing vehicle rather than flashing it on/off. */
+const STALE_TRAIN_GRACE_MS = 10_000;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * Math.min(1, Math.max(0, t));
-}
-
-function easeInOut(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
 function headingBetween(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
@@ -46,49 +43,18 @@ function resolveHeading(train: TrainFeature, fromLat: number, fromLon: number, t
   return headingBetween(fromLat, fromLon, toLat, toLon);
 }
 
-function segmentTargets(train: TrainFeature): {
-  lat: number;
-  lon: number;
-  fromLat: number;
-  fromLon: number;
-  toLat: number;
-  toLon: number;
-  heading: number;
-} | null {
-  const { segmentFromLat, segmentFromLon, segmentToLat, segmentToLon, segmentProgress, timeToNextStation } = train;
-  if (
-    segmentFromLat == null ||
-    segmentFromLon == null ||
-    segmentToLat == null ||
-    segmentToLon == null
-  ) {
-    return null;
-  }
-
-  // Estimate progress from ETA when available so mid-route trains keep gliding.
-  let progress = typeof segmentProgress === 'number' ? segmentProgress : 0.5;
-  if (typeof timeToNextStation === 'number' && timeToNextStation > 0) {
-    const etaProgress = 1 - Math.min(1, Math.max(0, timeToNextStation / (SEGMENT_GLIDE_MS / 1000)));
-    // Prefer ETA when we only have a coarse midpoint (0.5).
-    if (Math.abs(progress - 0.5) < 0.05) progress = etaProgress;
-  }
-
-  const lat = lerp(segmentFromLat, segmentToLat, progress);
-  const lon = lerp(segmentFromLon, segmentToLon, progress);
+function samplePosition(train: AnimatedTrain, now: number): Pick<AnimatedTrain, 'displayLat' | 'displayLon'> {
+  const t = Math.min(1, Math.max(0, (now - train.movedAt) / LERP_MS));
   return {
-    lat,
-    lon,
-    fromLat: segmentFromLat,
-    fromLon: segmentFromLon,
-    toLat: segmentToLat,
-    toLon: segmentToLon,
-    heading: resolveHeading(train, segmentFromLat, segmentFromLon, segmentToLat, segmentToLon),
+    displayLat: lerp(train.fromLat, train.targetLat, t),
+    displayLon: lerp(train.fromLon, train.targetLon, t),
   };
 }
 
 /**
  * Poll `/api/trains` every two seconds and expose smoothly interpolated positions.
- * Trains with a known station segment also glide forward between polls.
+ * Only confirmed TfL locations are interpolated; no estimated route progress
+ * is used, because the Unified API does not supply Underground train GPS.
  */
 export function useLiveTrains(modes: string[], enabled = true) {
   const [trains, setTrains] = useState<AnimatedTrain[]>([]);
@@ -116,21 +82,7 @@ export function useLiveTrains(modes: string[], enabled = true) {
 
       const next: AnimatedTrain[] = [];
       for (const train of mapRef.current.values()) {
-        const t = easeInOut((now - train.movedAt) / LERP_MS);
-        let displayLat = lerp(train.fromLat, train.targetLat, t);
-        let displayLon = lerp(train.fromLon, train.targetLon, t);
-
-        // Keep mid-route trains drifting toward the next station between polls.
-        const seg = segmentTargets(train);
-        if (seg && typeof train.timeToNextStation === 'number' && train.timeToNextStation > 8) {
-          const glide = Math.min(1, (now - train.movedAt) / SEGMENT_GLIDE_MS);
-          const ahead = Math.min(1, (train.segmentProgress ?? 0.5) + glide * 0.15);
-          const glideLat = lerp(seg.fromLat, seg.toLat, ahead);
-          const glideLon = lerp(seg.fromLon, seg.toLon, ahead);
-          // Blend poll-lerp with soft segment glide so motion never freezes.
-          displayLat = lerp(displayLat, glideLat, 0.35);
-          displayLon = lerp(displayLon, glideLon, 0.35);
-        }
+        const { displayLat, displayLon } = samplePosition(train, now);
 
         next.push({
           ...train,
@@ -156,35 +108,41 @@ export function useLiveTrains(modes: string[], enabled = true) {
 
         for (const train of payload.trains) {
           const existing = prev.get(train.id);
-          const seg = segmentTargets(train);
-          const targetLat = seg?.lat ?? train.lat;
-          const targetLon = seg?.lon ?? train.lon;
-          const heading =
-            seg?.heading ??
-            resolveHeading(
-              train,
-              existing?.displayLat ?? train.lat,
-              existing?.displayLon ?? train.lon,
-              targetLat,
-              targetLon,
-            );
+          const targetLat = train.lat;
+          const targetLon = train.lon;
 
           if (existing) {
+            // Sample the active interpolation at the precise fetch time. Using
+            // the last React paint here caused trains to snap backwards.
+            const current = samplePosition(existing, now);
             const moved =
               Math.abs(existing.targetLat - targetLat) > 1e-6 ||
               Math.abs(existing.targetLon - targetLon) > 1e-6;
+            const reportedHeading =
+              typeof train.heading === 'number' && Number.isFinite(train.heading) ? train.heading : undefined;
+            const heading =
+              reportedHeading ??
+              (moved
+                ? resolveHeading(train, current.displayLat, current.displayLon, targetLat, targetLon)
+                : existing.heading);
+
             next.set(train.id, {
               ...train,
-              fromLat: moved ? existing.displayLat : existing.fromLat,
-              fromLon: moved ? existing.displayLon : existing.fromLon,
-              targetLat,
-              targetLon,
-              displayLat: existing.displayLat,
-              displayLon: existing.displayLon,
+              fromLat: moved ? current.displayLat : existing.fromLat,
+              fromLon: moved ? current.displayLon : existing.fromLon,
+              targetLat: moved ? targetLat : existing.targetLat,
+              targetLon: moved ? targetLon : existing.targetLon,
+              displayLat: current.displayLat,
+              displayLon: current.displayLon,
               movedAt: moved ? now : existing.movedAt,
-              heading: moved ? heading : existing.heading || heading,
+              lastSeenAt: now,
+              heading,
             });
           } else {
+            const heading =
+              typeof train.heading === 'number' && Number.isFinite(train.heading)
+                ? train.heading
+                : resolveHeading(train, train.lat, train.lon, targetLat, targetLon);
             next.set(train.id, {
               ...train,
               fromLat: targetLat,
@@ -194,7 +152,26 @@ export function useLiveTrains(modes: string[], enabled = true) {
               displayLat: targetLat,
               displayLon: targetLon,
               movedAt: now,
+              lastSeenAt: now,
               heading,
+            });
+          }
+        }
+
+        // A single volatile TfL response should not make a carriage flash out
+        // and then reappear as a new object on the next poll.
+        for (const [id, train] of prev) {
+          if (!next.has(id) && now - train.lastSeenAt < STALE_TRAIN_GRACE_MS) {
+            const current = samplePosition(train, now);
+            next.set(id, {
+              ...train,
+              fromLat: current.displayLat,
+              fromLon: current.displayLon,
+              targetLat: current.displayLat,
+              targetLon: current.displayLon,
+              displayLat: current.displayLat,
+              displayLon: current.displayLon,
+              movedAt: now,
             });
           }
         }
