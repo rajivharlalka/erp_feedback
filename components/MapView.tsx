@@ -5,8 +5,11 @@ import maplibregl from 'maplibre-gl';
 import { useEffect, useRef, useState } from 'react';
 import { boundsOfLine } from '@/map/geo';
 import { buildLayers } from '@/map/buildLayers';
+import { buildTrainLayers } from '@/map/buildTrainLayer';
+import type { AnimatedTrain } from '@/hooks/useLiveTrains';
 import type { LineFeature, ModeMeta, StationFeature } from '@/lib/types';
 import { StationTooltip } from './StationTooltip';
+import { TrainTooltip } from './TrainTooltip';
 
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 const LONDON_CENTER: [number, number] = [-0.1276, 51.5072];
@@ -17,9 +20,16 @@ interface HoveredStation {
   y: number;
 }
 
+interface HoveredTrain {
+  train: AnimatedTrain;
+  x: number;
+  y: number;
+}
+
 interface MapViewProps {
   lines: LineFeature[];
   stations: StationFeature[];
+  trains: AnimatedTrain[];
   modeMeta: Record<string, ModeMeta>;
   visibleModes: Set<string>;
   focusLine: LineFeature | null;
@@ -30,6 +40,7 @@ interface MapViewProps {
 export function MapView({
   lines,
   stations,
+  trains,
   modeMeta,
   visibleModes,
   focusLine,
@@ -41,7 +52,8 @@ export function MapView({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [hovered, setHovered] = useState<HoveredStation | null>(null);
+  const [hoveredStation, setHoveredStation] = useState<HoveredStation | null>(null);
+  const [hoveredTrain, setHoveredTrain] = useState<HoveredTrain | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -70,7 +82,7 @@ export function MapView({
 
     mapRef.current = map;
 
-    const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+    const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
     overlayRef.current = overlay;
     map.addControl(overlay as unknown as maplibregl.IControl);
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -79,9 +91,6 @@ export function MapView({
       if (cancelled) return;
       setMapReady(true);
       window.clearTimeout(readyFallback);
-      // Force a resize now that the container has a real layout size — MapLibre
-      // measures the container at construction time, which can be 0x0 if React
-      // hasn't finished painting yet.
       map?.resize();
       map?.easeTo({
         center: LONDON_CENTER,
@@ -116,18 +125,32 @@ export function MapView({
 
   useEffect(() => {
     if (!overlayRef.current || !mapReady) return;
-    overlayRef.current.setProps({
-      layers: buildLayers({
-        lines,
-        stations,
-        modeMeta,
-        visibleModes,
-        hoveredStationId: hovered?.station.id ?? null,
-        onHoverStation: (station, x, y) => setHovered(station ? { station, x, y } : null),
-        onClickLine: onSelectLine,
-      }),
+
+    const baseLayers = buildLayers({
+      lines,
+      stations,
+      modeMeta,
+      visibleModes,
+      hoveredStationId: hoveredStation?.station.id ?? null,
+      onHoverStation: (station, x, y) => {
+        setHoveredStation(station ? { station, x, y } : null);
+        if (station) setHoveredTrain(null);
+      },
+      onClickLine: onSelectLine,
     });
-  }, [lines, stations, modeMeta, visibleModes, hovered, onSelectLine, mapReady]);
+
+    const trainLayers = buildTrainLayers({
+      trains,
+      visibleModes,
+      hoveredTrainId: hoveredTrain?.train.id ?? null,
+      onHoverTrain: (train, x, y) => {
+        setHoveredTrain(train ? { train, x, y } : null);
+        if (train) setHoveredStation(null);
+      },
+    });
+
+    overlayRef.current.setProps({ layers: [...baseLayers, ...trainLayers] });
+  }, [lines, stations, trains, modeMeta, visibleModes, hoveredStation, hoveredTrain, onSelectLine, mapReady]);
 
   useEffect(() => {
     if (!focusLine || !mapRef.current || !mapReady) return;
@@ -167,7 +190,10 @@ export function MapView({
           </div>
         </div>
       )}
-      {hovered && <StationTooltip station={hovered.station} x={hovered.x} y={hovered.y} />}
+      {hoveredTrain && <TrainTooltip train={hoveredTrain.train} x={hoveredTrain.x} y={hoveredTrain.y} />}
+      {!hoveredTrain && hoveredStation && (
+        <StationTooltip station={hoveredStation.station} x={hoveredStation.x} y={hoveredStation.y} />
+      )}
     </div>
   );
 }

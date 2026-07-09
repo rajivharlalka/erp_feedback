@@ -6,9 +6,9 @@ import { Header } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
 import { Legend } from '@/components/Legend';
 import { useNetworkData, AVAILABLE_MODES } from '@/hooks/useNetworkData';
+import { useLiveTrains } from '@/hooks/useLiveTrains';
 import type { LineFeature } from '@/lib/types';
 
-// MapLibre / deck.gl need a real browser WebGL context — never SSR them.
 const MapView = dynamic(() => import('@/components/MapView').then((m) => m.MapView), {
   ssr: false,
   loading: () => (
@@ -38,12 +38,12 @@ function useIsDesktop() {
 export function TransportMapApp() {
   const modes = useMemo<string[]>(() => [...AVAILABLE_MODES], []);
   const { data, isLoading, isFetching, isError, error, refetch } = useNetworkData(modes);
+  const { trains, count: trainCount, isLive: trainsLive } = useLiveTrains(modes, !isLoading && !!data);
   const [visibleModes, setVisibleModes] = useState<Set<string>>(new Set(modes));
   const [selectedLine, setSelectedLine] = useState<LineFeature | null>(null);
   const isDesktop = useIsDesktop();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Keep the desktop sidebar "open" for accessibility / aria; mobile starts closed.
   useEffect(() => {
     if (isDesktop) setSidebarOpen(true);
     else setSidebarOpen(false);
@@ -67,6 +67,7 @@ export function TransportMapApp() {
       <MapView
         lines={lines}
         stations={stations}
+        trains={trains}
         modeMeta={modeMeta}
         visibleModes={visibleModes}
         focusLine={selectedLine}
@@ -80,6 +81,8 @@ export function TransportMapApp() {
         onRefresh={() => refetch()}
         showMenuButton={!isLoading && !!data}
         onOpenSidebar={() => setSidebarOpen(true)}
+        trainCount={trainCount}
+        trainsLive={trainsLive}
       />
 
       {!isLoading && data && (
@@ -97,7 +100,6 @@ export function TransportMapApp() {
         />
       )}
 
-      {/* Hide legend while the mobile sheet is open so panels don't stack. */}
       {!isLoading && data && (isDesktop || !sidebarOpen) && <Legend />}
 
       {isLoading && (
