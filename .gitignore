@@ -1,11 +1,15 @@
 node_modules/
+.next/
+out/
 dist/
 build/
 .env
 .env.local
+.env*.local
 *.log
 npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
 *.tsbuildinfo
+next-env.d.ts

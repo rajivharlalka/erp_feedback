@@ -1,6 +1,6 @@
 # London Underground — Live 3D
 
-An unofficial, open-source 3D visualization of live London Underground line status, built on Transport for London's Unified API.
+An unofficial, open-source 3D visualization of live London Underground line status, built on Transport for London's Unified API and deployed as a **Next.js** app.
 
 Tube lines are drawn as elevated paths over a pitched MapLibre map of London. Stations float above the city on thin stems — the worse the service, the higher they rise. Status colors (green / amber / orange / red) mirror what Tube customers see on the TfL site.
 
@@ -17,15 +17,17 @@ Tube lines are drawn as elevated paths over a pitched MapLibre map of London. St
 ## Architecture
 
 ```
-web/          Vite + React + TypeScript frontend
-              MapLibre GL + deck.gl + TanStack Query + Tailwind
+app/                 Next.js App Router
+  api/network        Route Handler — proxies + caches TfL Unified API
+  api/health         Health check
+  page.tsx           Client map UI (dynamic import, no SSR for WebGL)
 
-server/       Express + TypeScript API proxy
-              Caches TfL /Status (~45s) and /Route/Sequence (~12h)
-              Aggregates lines + stations into one /api/network payload
+lib/                 Shared TfL client, cache, severity, types
+components/          Header, Sidebar, Legend, MapView, …
+map/                 deck.gl layer builders
 ```
 
-The browser never talks to TfL directly (no CORS, and to keep the optional API key off the client). In production the Express server also serves the built frontend, so the whole app is one process.
+The browser never talks to TfL directly (no CORS, and to keep the optional API key off the client). `/api/network` runs on the server (Node runtime) and caches status (~45s) and route geometry (~12h).
 
 ## Quick start
 
@@ -36,15 +38,15 @@ npm install
 npm run dev
 ```
 
-Then open [http://localhost:5173](http://localhost:5173). Vite proxies `/api` to the Express server on port 3001.
+Then open [http://localhost:3000](http://localhost:3000).
 
 ### Optional TfL API key
 
-The app works anonymously (TfL allows ~50 requests/min without a key, and this server caches aggressively). To raise the limit to 500 requests/min, register at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk), then:
+The app works anonymously (TfL allows ~50 requests/min without a key, and this app caches aggressively). To raise the limit to 500 requests/min, register at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk), then:
 
 ```bash
-cp server/.env.example server/.env
-# edit server/.env and set TFL_APP_KEY=...
+cp .env.example .env.local
+# edit .env.local and set TFL_APP_KEY=...
 ```
 
 ### Production build
@@ -54,20 +56,35 @@ npm run build
 npm start
 ```
 
-Serves the app at [http://localhost:3001](http://localhost:3001).
+## Deploy to Vercel
+
+1. Push this repo to GitHub (already done on this branch).
+2. Import the project at [vercel.com/new](https://vercel.com/new).
+3. Framework Preset: **Next.js** (auto-detected). Leave build/output defaults.
+4. Optional: add `TFL_APP_KEY` under Project → Settings → Environment Variables.
+5. Deploy.
+
+Or from the CLI:
+
+```bash
+npx vercel
+# production:
+npx vercel --prod
+```
 
 ## Adding another mode later
 
-1. Add the mode id to `MODES` in [`server/src/config.ts`](server/src/config.ts) and `AVAILABLE_MODES` in [`web/src/hooks/useNetworkData.ts`](web/src/hooks/useNetworkData.ts).
-2. Confirm `MODE_META` / `LINE_COLORS` already have entries for it (placeholders are already there for DLR, Overground, Elizabeth line, Tram, River Bus, Cable Car).
-3. Drop an icon at `web/public/icons/<mode>.png` if you want a custom station glyph.
-4. Remove the matching entry from the "soon" list in [`web/src/components/Sidebar.tsx`](web/src/components/Sidebar.tsx).
+1. Add the mode id to `MODES` in [`lib/config.ts`](lib/config.ts) and `AVAILABLE_MODES` in [`hooks/useNetworkData.ts`](hooks/useNetworkData.ts).
+2. Confirm `MODE_META` / `LINE_COLORS` already have entries for it (placeholders are already there).
+3. Drop an icon at `public/icons/<mode>.png` if you want a custom station glyph.
+4. Remove the matching entry from the "soon" list in [`components/Sidebar.tsx`](components/Sidebar.tsx).
 
 ## Credits
 
 - Live data: [Transport for London Unified API](https://api.tfl.gov.uk/) (open data)
 - Basemap tiles & style: [OpenFreeMap](https://openfreemap.org/) / OpenMapTiles / OpenStreetMap contributors
 - Map rendering: [MapLibre GL JS](https://maplibre.org/), [deck.gl](https://deck.gl/)
+- Framework: [Next.js](https://nextjs.org/)
 
 ## License
 
